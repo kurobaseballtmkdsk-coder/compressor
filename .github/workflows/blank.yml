@@ -1,0 +1,442 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+/* compressor.html と同じフォルダに置く。COOP/COEP ヘッダーを付与して動画圧縮のマルチスレッド化を有効にする。
+   ※ file:// で直接開いた場合は動きません。ローカルサーバーか Web サーバー上で開いてください。 */
+if (typeof window === 'undefined') {
+  self.addEventListener('install', () => self.skipWaiting());
+  self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+  self.addEventListener('fetch', e => {
+    const r = e.request;
+    if (r.cache === 'only-if-cached' && r.mode !== 'same-origin') return;
+    e.respondWith(fetch(r).then(res => {
+      if (res.status === 0) return res;
+      const h = new Headers(res.headers);
+      h.set('Cross-Origin-Embedder-Policy', 'require-corp');
+      h.set('Cross-Origin-Opener-Policy', 'same-origin');
+      h.set('Cross-Origin-Resource-Policy', 'cross-origin');
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+    }).catch(() => fetch(r)));
+  });
+} else {
+  window.__coi = 'checking';
+  (async () => {
+    if (window.crossOriginIsolated) { window.__coi = 'ok'; return; }
+    if (location.protocol === 'file:') { window.__coi = 'file'; return; }
+    if (!navigator.serviceWorker) { window.__coi = 'nosw'; return; }
+    const src = document.currentScript.src;
+    try {
+      const reg = await navigator.serviceWorker.register(src, { scope: './' });
+      await navigator.serviceWorker.ready;
+      if (!navigator.serviceWorker.controller) {
+        // 初回登録：SW がまだページを制御していないので一度だけ再読み込み
+        if (!sessionStorage.getItem('coi-reloaded')) { sessionStorage.setItem('coi-reloaded', '1'); location.reload(); return; }
+        window.__coi = 'nocontrol'; return;
+      }
+      if (!window.crossOriginIsolated) {
+        if (!sessionStorage.getItem('coi-reloaded2')) { sessionStorage.setItem('coi-reloaded2', '1'); location.reload(); return; }
+        window.__coi = 'notisolated';
+      }
+    } catch (e) { window.__coi = 'error:' + (e.message || e); }
+  })();
+}
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>軽くする — 動画・PDFを9.5MBに</title>
+<script src="./coi.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" crossorigin="anonymous">
+<style>
+  :root{
+    --navy:#17325B; --navy-deep:#0E2140; --red:#B8182B;
+    --paper:#F4F4F1; --white:#FFFFFF; --line:#D6D9D2; --ink:#1A1F2B; --mute:#6B7280;
+    --pond:#2E6D8F; --pond-soft:#E1EEF4; --ok:#1E7A4C; --warn:#9A4A11;
+    --serif:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+    --sans:"Noto Sans JP","Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{background:var(--paper)}
+  body{margin:0;color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}
+
+  /* 三色旗：紺・赤・紺 */
+  .tricolor{height:10px;background:linear-gradient(to bottom,var(--navy) 0 40%,var(--red) 40% 60%,var(--navy) 60% 100%)}
+
+  header{max-width:1040px;margin:0 auto;padding:44px 24px 28px;display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end}
+  .eyebrow{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--navy);font-weight:700;margin:0 0 10px}
+  h1{margin:0;font-family:var(--serif);font-weight:800;font-size:44px;line-height:1.15;letter-spacing:.02em;color:var(--navy-deep)}
+  h1 em{font-style:normal;color:var(--red)}
+  .lead{margin:14px 0 0;max-width:560px;color:var(--mute);font-size:14px}
+  .lead b{color:var(--ink);font-weight:700}
+  .badge{border:1px solid var(--navy);color:var(--navy);padding:6px 12px;font-size:12px;letter-spacing:.08em;white-space:nowrap}
+  .badge span{display:block;font-family:var(--serif);font-size:28px;font-weight:800;letter-spacing:0;line-height:1.1;color:var(--navy-deep)}
+  @media (max-width:760px){header{grid-template-columns:1fr}h1{font-size:34px}}
+
+  main{max-width:1040px;margin:0 auto;padding:0 24px 40px;display:grid;gap:24px;grid-template-columns:1fr 1fr}
+  @media (max-width:760px){main{grid-template-columns:1fr}}
+
+  .card{background:var(--white);border:1px solid var(--line);border-top:4px solid var(--navy);padding:24px 24px 22px;display:flex;flex-direction:column;gap:16px}
+  .card.pdf{border-top-color:var(--red)}
+  .card h2{margin:0;font-family:var(--serif);font-size:22px;font-weight:800;display:flex;align-items:baseline;gap:12px;color:var(--navy-deep)}
+  .card h2 small{font-family:var(--sans);font-size:11px;letter-spacing:.18em;color:var(--mute);font-weight:700}
+
+  .drop{border:1.5px dashed var(--line);padding:30px 16px;text-align:center;color:var(--mute);cursor:pointer;background:var(--paper);transition:.15s}
+  .drop.over,.drop:hover{border-color:var(--navy);background:var(--pond-soft)}
+  .drop strong{display:block;color:var(--ink);margin-bottom:2px;font-weight:700}
+  .drop input{display:none}
+  .file{font-size:13px;color:var(--mute);word-break:break-all;min-height:1.5em}
+  .file b{color:var(--ink)}
+
+  button.go{appearance:none;border:0;background:var(--navy);color:#fff;font:inherit;font-weight:700;letter-spacing:.06em;padding:13px 18px;cursor:pointer;transition:background .15s}
+  button.go:hover:not(:disabled){background:var(--navy-deep)}
+  button.go:disabled{background:#C3C7CE;cursor:not-allowed}
+  button.go:focus-visible{outline:3px solid var(--pond-soft)}
+
+  /* 進捗 */
+  .prog{display:none;flex-direction:column;gap:8px}
+  .prog.on{display:flex}
+  .prog .head{display:flex;justify-content:space-between;align-items:baseline;font-size:13px}
+  .prog .head b{font-family:var(--serif);font-size:24px;font-weight:800;color:var(--navy-deep);font-variant-numeric:tabular-nums}
+  .prog .stage{color:var(--mute)}
+  .track{height:10px;background:var(--line);position:relative;overflow:hidden}
+  .track i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--pond);transition:width .4s linear}
+  .track i.done{background:var(--navy)}
+  .steps{display:flex;gap:6px;font-size:11px;letter-spacing:.06em;color:var(--mute)}
+  .steps span{flex:1;padding-top:6px;border-top:2px solid var(--line)}
+  .steps span.cur{border-top-color:var(--red);color:var(--ink);font-weight:700}
+  .steps span.ok{border-top-color:var(--navy)}
+  .eta{font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}
+
+  /* 結果 */
+  .result{display:none;border-top:1px solid var(--line);padding-top:16px;gap:12px;flex-direction:column}
+  .result.on{display:flex}
+  .sizes{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;font-variant-numeric:tabular-nums}
+  .sizes div{font-size:12px;color:var(--mute)}
+  .sizes div b{display:block;font-family:var(--serif);font-size:24px;font-weight:800;color:var(--ink)}
+  .sizes .arrow{font-family:var(--serif);font-size:22px;color:var(--red)}
+  .sizes div.after b{color:var(--ok)}
+  .sizes div.after.bad b{color:var(--warn)}
+  .squeeze{height:14px;background:var(--line);position:relative}
+  .squeeze i{position:absolute;left:0;top:0;bottom:0;background:var(--navy);width:100%;transition:width .9s cubic-bezier(.2,.8,.2,1)}
+  a.dl{display:block;text-align:center;background:var(--red);color:#fff;text-decoration:none;font-weight:700;letter-spacing:.06em;padding:12px 16px}
+  a.dl:hover{background:#98111F}
+  .msg{font-size:13px;color:var(--warn);min-height:1.2em}
+  .status{font-size:13px;color:var(--mute)}
+
+  footer{max-width:1040px;margin:0 auto;padding:0 24px 40px;font-size:12px;color:var(--mute);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:16px}
+  footer .stripe{display:inline-block;width:36px;height:8px;vertical-align:middle;margin-right:8px;background:linear-gradient(to bottom,var(--navy) 0 40%,var(--red) 40% 60%,var(--navy) 60% 100%)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="tricolor"></div>
+<header>
+  <div>
+    <h1>重いファイルを、<em>9.5MB</em>に。</h1>
+    <p class="lead">動画(MP4)とPDFをブラウザの中だけで圧縮します。ファイルは<b>どこにも送信されません</b>。容量は自動で9.5MB前後に収めます。</p>
+  </div>
+  <div class="badge">上限<span>9.5<small style="font-size:14px">MB</small></span></div>
+</header>
+
+<main>
+  <!-- ===== VIDEO ===== -->
+  <section class="card">
+    <h2>動画 <small>MP4 / MOV</small></h2>
+    <label class="drop" id="vdrop">
+      <strong>動画をここにドロップ</strong>またはタップして選択
+      <input type="file" id="vfile" accept="video/mp4,video/quicktime,video/*">
+    </label>
+    <div class="file" id="vinfo">ファイル未選択</div>
+    <button class="go" id="vgo" disabled>9.5MBに圧縮する</button>
+    <div class="status" id="vstat"></div>
+    <div class="prog" id="vprog">
+      <div class="head"><b id="vpct">0%</b><span class="stage" id="vstage"></span></div>
+      <div class="track"><i id="vbar"></i></div>
+      <div class="steps"><span id="s1">準備</span><span id="s2">解析パス</span><span id="s3">本番パス</span><span id="s4">完了</span></div>
+      <div class="eta" id="veta"></div>
+    </div>
+    <div class="result" id="vres">
+      <div class="sizes"><div>元のサイズ<b id="vbefore"></b></div><div class="arrow">→</div><div class="after" id="vafterbox">圧縮後<b id="vafter"></b></div></div>
+      <div class="squeeze"><i id="vsq"></i></div>
+      <a class="dl" id="vdl" download>圧縮した動画を保存</a>
+    </div>
+    <div class="msg" id="vmsg"></div>
+  </section>
+
+  <!-- ===== PDF ===== -->
+  <section class="card pdf">
+    <h2>PDF <small>PDF</small></h2>
+    <label class="drop" id="pdrop">
+      <strong>PDFをここにドロップ</strong>またはタップして選択
+      <input type="file" id="pfile" accept="application/pdf">
+    </label>
+    <div class="file" id="pinfo">ファイル未選択</div>
+    <button class="go" id="pgo" disabled>9.5MBに圧縮する</button>
+    <div class="status" id="pstat"></div>
+    <div class="prog" id="pprog">
+      <div class="head"><b id="ppct">0%</b><span class="stage" id="pstage"></span></div>
+      <div class="track"><i id="pbar"></i></div>
+    </div>
+    <div class="result" id="pres">
+      <div class="sizes"><div>元のサイズ<b id="pbefore"></b></div><div class="arrow">→</div><div class="after" id="pafterbox">圧縮後<b id="pafter"></b></div></div>
+      <div class="squeeze"><i id="psq"></i></div>
+      <a class="dl" id="pdl" download>圧縮したPDFを保存</a>
+    </div>
+    <div class="msg" id="pmsg">※ 各ページを画像として再構成するため、文字の選択・検索はできなくなります。</div>
+  </section>
+</main>
+
+<footer>
+  <span><span class="stripe"></span></span>
+  <span id="threads">動画エンジン: 確認中…</span>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js" crossorigin="anonymous"></script>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = b => b < 1024*1024 ? (b/1024).toFixed(0)+' KB' : (b/1024/1024).toFixed(2)+' MB';
+const TARGET = 9.5*1024*1024, SAFE = 9.25*1024*1024;
+const MT = !!window.crossOriginIsolated;
+(function diag(){
+  const why = {
+    file: 'ファイルを直接開いているため（file://）。Webサーバー上で開くと有効になります',
+    nosw: 'このブラウザはService Workerに未対応です',
+    nocontrol: 'coi.jsの登録は済みましたが未適用です。ページを再読み込みしてください',
+    notisolated: 'ヘッダーが適用されませんでした。別のブラウザ（Chrome/Edge）をお試しください',
+    checking: '確認中…',
+  };
+  const t = $('threads');
+  const tick = () => {
+    if (window.crossOriginIsolated) { t.textContent = `動画エンジン: マルチスレッド（${navigator.hardwareConcurrency||4}コア）`; return; }
+    const c = window.__coi;
+    if (c === undefined) { t.textContent = '動画エンジン: シングルスレッド — coi.js が同じフォルダにありません'; return; }
+    if (c === 'checking') { setTimeout(tick, 300); return; }
+    t.textContent = '動画エンジン: シングルスレッド — ' + (why[c] || c);
+  };
+  tick();
+})();
+
+function wireDrop(dropId, inputId, onFile){
+  const d = $(dropId), inp = $(inputId);
+  ['dragenter','dragover'].forEach(e=>d.addEventListener(e,ev=>{ev.preventDefault();d.classList.add('over')}));
+  ['dragleave','drop'].forEach(e=>d.addEventListener(e,ev=>{ev.preventDefault();d.classList.remove('over')}));
+  d.addEventListener('drop',ev=>{ const f=ev.dataTransfer.files[0]; if(f) onFile(f); });
+  inp.addEventListener('change',()=>{ if(inp.files[0]) onFile(inp.files[0]); });
+}
+function setProg(p, pct, stage){
+  $(p+'pct').textContent = Math.round(pct)+'%';
+  $(p+'bar').style.width = pct+'%';
+  if (stage !== undefined) $(p+'stage').textContent = stage;
+}
+function showResult(p, before, after, blob, name){
+  $(p+'before').textContent = fmt(before);
+  $(p+'after').textContent = fmt(after);
+  $(p+'afterbox').classList.toggle('bad', after > TARGET);
+  $(p+'sq').style.width = Math.max(2, after/before*100)+'%';
+  const a = $(p+'dl'); a.href = URL.createObjectURL(blob); a.download = name;
+  $(p+'res').classList.add('on');
+  $(p+'bar').classList.add('done');
+}
+function reset(p){
+  $(p+'res').classList.remove('on'); $(p+'prog').classList.add('on');
+  $(p+'bar').classList.remove('done'); setProg(p, 0, ''); $(p+'msg').textContent = '';
+  $(p+'sq').style.width = '100%';
+}
+const mmss = s => { s=Math.max(0,Math.round(s)); return `${Math.floor(s/60)}分${String(s%60).padStart(2,'0')}秒`; };
+
+/* ================= VIDEO ================= */
+let vFile = null, ffmpeg = null, vDur = 0, vT0 = 0;
+let vPass = 1, vStageBase = 0, vStageSpan = 0;   // 全体進捗 = base + span * (このパスの進捗)
+wireDrop('vdrop','vfile', f => {
+  vFile = f; $('vinfo').innerHTML = `<b>${f.name}</b> ・ ${fmt(f.size)}`;
+  $('vmsg').textContent = f.size > 1024*1024*1024 ? '1GBを超えています。ブラウザのメモリ不足で失敗する可能性があります。' : '';
+  $('vgo').disabled = false;
+});
+function videoMeta(file){
+  return new Promise((res, rej) => {
+    const v = document.createElement('video'); v.preload = 'metadata';
+    v.onloadedmetadata = () => { const m = {duration: v.duration, w: v.videoWidth, h: v.videoHeight}; URL.revokeObjectURL(v.src); res(m); };
+    v.onerror = () => rej(new Error('動画の情報を読み取れません'));
+    v.src = URL.createObjectURL(file);
+  });
+}
+function setStep(n){ for (let i=1;i<=4;i++){ const el=$('s'+i); el.classList.toggle('cur', i===n); el.classList.toggle('ok', i<n); } }
+async function loadFFmpeg(){
+  if (ffmpeg) return ffmpeg;
+  const { FFmpeg } = FFmpegWASM, { toBlobURL } = FFmpegUtil;
+  ffmpeg = new FFmpeg();
+  // ログの time=HH:MM:SS.xx から進捗を算出（progressイベントより確実）
+  ffmpeg.on('log', ({message}) => {
+    const m = /time=(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(message);
+    if (!m || !vDur) return;
+    const t = (+m[1])*3600 + (+m[2])*60 + (+m[3]);
+    const frac = Math.min(1, t / vDur);
+    const overall = vStageBase + vStageSpan * frac;
+    setProg('v', overall);
+    const elapsed = (performance.now()-vT0)/1000;
+    if (overall > 3) $('veta').textContent = `経過 ${mmss(elapsed)} ／ 残り目安 ${mmss(elapsed*(100-overall)/overall)}`;
+  });
+  const lib  = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd';
+  const core = MT ? 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-mt@0.12.6/dist/umd'
+                  : 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
+  const opt = {
+    coreURL: await toBlobURL(`${core}/ffmpeg-core.js`, 'text/javascript'),
+    wasmURL: await toBlobURL(`${core}/ffmpeg-core.wasm`, 'application/wasm'),
+    classWorkerURL: await toBlobURL(`${lib}/814.ffmpeg.js`, 'text/javascript'),
+  };
+  if (MT) opt.workerURL = await toBlobURL(`${core}/ffmpeg-core.worker.js`, 'text/javascript');
+  await ffmpeg.load(opt);
+  return ffmpeg;
+}
+
+$('vgo').addEventListener('click', async () => {
+  if (!vFile) return;
+  $('vgo').disabled = true; reset('v'); $('veta').textContent = ''; setStep(1);
+  vT0 = performance.now();
+  try {
+    if (vFile.size <= TARGET) {
+      setProg('v', 100, 'すでに9.5MB以下'); setStep(4);
+      showResult('v', vFile.size, vFile.size, vFile, vFile.name);
+      $('vgo').disabled = false; return;
+    }
+    setProg('v', 1, 'エンジンを読み込み中（初回のみ約30MB）');
+    const meta = await videoMeta(vFile); vDur = meta.duration;
+    const ff = await loadFFmpeg();
+    setProg('v', 4, 'ファイルを読み込み中');
+    await ff.writeFile('in.mp4', await FFmpegUtil.fetchFile(vFile));
+
+    const audioK = vDur > 900 ? 48 : 64;
+    let videoK = Math.max(60, Math.floor((SAFE*8/1000)/vDur - audioK));
+    let blob = null;
+    const threads = MT ? String(Math.min(8, navigator.hardwareConcurrency||4)) : '1';
+    for (vPass = 1; vPass <= 3; vPass++) {
+      const res = videoK < 300 ? 360 : videoK < 700 ? 480 : videoK < 1500 ? 720 : 1080;
+      const tag = vPass > 1 ? `（再調整 ${vPass}回目）` : '';
+      const common = ['-threads', threads, '-vf', `scale=-2:'min(${res},ih)'`,
+        '-c:v','libx264','-preset', MT ? 'medium' : 'fast','-pix_fmt','yuv420p',
+        '-b:v',`${videoK}k`,'-maxrate',`${Math.floor(videoK*1.3)}k`,'-bufsize',`${videoK*3}k`];
+      // 解析パスは軽い（全体の約30%）、本番パスが重い（約65%）
+      vStageBase = 5; vStageSpan = 30; setStep(2); setProg('v', 5, `解析パス ${res}p${tag}`);
+      let code = await ff.exec(['-y','-i','in.mp4', ...common, '-pass','1','-passlogfile','plog','-an','-f','null','-']);
+      if (code !== 0) throw new Error('解析に失敗しました（コード '+code+'）');
+      vStageBase = 35; vStageSpan = 63; setStep(3); setProg('v', 35, `本番パス ${res}p${tag}`);
+      code = await ff.exec(['-y','-i','in.mp4', ...common, '-pass','2','-passlogfile','plog',
+        '-c:a','aac','-b:a',`${audioK}k`,'-ac','2','-movflags','+faststart','out.mp4']);
+      if (code !== 0) throw new Error('変換に失敗しました（コード '+code+'）');
+      const data = await ff.readFile('out.mp4');
+      blob = new Blob([data.buffer], {type:'video/mp4'});
+      if (blob.size <= TARGET) break;
+      videoK = Math.max(60, Math.floor(videoK * (SAFE/blob.size) * 0.97));
+    }
+    await ff.deleteFile('in.mp4'); await ff.deleteFile('out.mp4');
+    setStep(4); setProg('v', 100, blob.size <= TARGET ? '完了' : '9.5MBに届きませんでした');
+    $('veta').textContent = `処理時間 ${mmss((performance.now()-vT0)/1000)}`;
+    showResult('v', vFile.size, blob.size, blob, vFile.name.replace(/\.[^.]+$/,'') + '_9.5MB.mp4');
+    if (blob.size > TARGET) $('vmsg').textContent = '3回試しましたが9.5MBに収まりませんでした。非常に長い動画は限界があります。';
+  } catch (e) {
+    console.error(e);
+    $('vmsg').textContent = 'エラー: ' + (e.message || e) + '。ファイルが大きすぎる場合は失敗することがあります。';
+    $('vstage').textContent = '中断';
+  }
+  $('vgo').disabled = false;
+});
+
+/* ================= PDF ================= */
+let pFile = null;
+fetch('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js').then(r=>r.blob())
+  .then(b=>{ pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(b); })
+  .catch(()=>{ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; });
+wireDrop('pdrop','pfile', f => {
+  pFile = f; $('pinfo').innerHTML = `<b>${f.name}</b> ・ ${fmt(f.size)}`; $('pgo').disabled = false;
+});
+async function buildPdf(src, dpi, q, pass){
+  const out = await PDFLib.PDFDocument.create();
+  const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
+  for (let i = 1; i <= src.numPages; i++) {
+    setProg('p', (i-1)/src.numPages*100, `${pass>1?`再調整${pass}回目 · `:''}ページ ${i} / ${src.numPages}（${dpi}dpi）`);
+    const page = await src.getPage(i);
+    const vp = page.getViewport({scale: dpi/72});
+    canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    await page.render({canvasContext: ctx, viewport: vp}).promise;
+    const jpg = await new Promise(r => canvas.toBlob(r, 'image/jpeg', q));
+    const img = await out.embedJpg(await jpg.arrayBuffer());
+    const pt = page.getViewport({scale: 1});
+    out.addPage([pt.width, pt.height]).drawImage(img, {x:0, y:0, width: pt.width, height: pt.height});
+    page.cleanup();
+  }
+  setProg('p', 99, '書き出し中');
+  const bytes = await out.save({useObjectStreams: true});
+  return new Blob([bytes], {type:'application/pdf'});
+}
+$('pgo').addEventListener('click', async () => {
+  if (!pFile) return;
+  $('pgo').disabled = true; reset('p');
+  try {
+    if (pFile.size <= TARGET) {
+      setProg('p', 100, 'すでに9.5MB以下');
+      showResult('p', pFile.size, pFile.size, pFile, pFile.name);
+      $('pgo').disabled = false; return;
+    }
+    const src = await pdfjsLib.getDocument({data: await pFile.arrayBuffer()}).promise;
+    let dpi = 120, q = 0.75, blob = null;
+    for (let pass = 1; pass <= 4; pass++) {
+      blob = await buildPdf(src, dpi, q, pass);
+      if (blob.size <= TARGET) break;
+      const r = SAFE / blob.size;
+      if (r > 0.6 && q > 0.4) q = Math.max(0.3, q * r * 0.9);
+      else { dpi = Math.max(40, Math.floor(dpi * Math.sqrt(r) * 0.95)); q = Math.max(0.3, q - 0.1); }
+    }
+    setProg('p', 100, blob.size <= TARGET ? '完了' : '9.5MBに届きませんでした');
+    showResult('p', pFile.size, blob.size, blob, pFile.name.replace(/\.pdf$/i,'') + '_9.5MB.pdf');
+    if (blob.size > TARGET) $('pmsg').textContent = '4回試しましたが9.5MBに収まりませんでした。ページ数が非常に多い場合は限界があります。';
+  } catch (e) {
+    console.error(e);
+    $('pmsg').textContent = 'エラー: ' + (e.message || e) + '。パスワード付きPDFは開けません。';
+    $('pstage').textContent = '中断';
+  }
+  $('pgo').disabled = false;
+});
+</script>
+</body>
+</html>
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v4
+
+      # Runs a single command using the runners shell
+      - name: Run a one-line script
+        run: echo Hello, world!
+
+      # Runs a set of commands using the runners shell
+      - name: Run a multi-line script
+        run: |
+          echo Add other actions to build,
+          echo test, and deploy your project.
